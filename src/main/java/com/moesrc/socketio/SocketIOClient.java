@@ -177,6 +177,10 @@ public class SocketIOClient extends Emitter {
         return this;
     }
 
+    public String getSid() {
+        return sid;
+    }
+
     protected Emitter onEvent(final String name, final Object... args) {
         executorService.submit(new Runnable() {
             @Override
