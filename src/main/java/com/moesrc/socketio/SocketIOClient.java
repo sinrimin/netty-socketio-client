@@ -1,6 +1,7 @@
 package com.moesrc.socketio;
 
 import io.netty.handler.codec.http.websocketx.WebSocketClientHandshaker13;
+import io.netty.handler.ssl.JdkSslContext;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import org.json.JSONObject;
@@ -21,6 +22,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Logger;
 
+import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLException;
 
 import io.netty.bootstrap.Bootstrap;
@@ -223,6 +225,14 @@ public class SocketIOClient extends Emitter {
         this.pingTimeout = option.getPingTimeout();
         this.pingInterval = option.getPingInterval();
 
+        if (ssl) {
+            if (option.getSslContext() != null) {
+                this.sslCtx = option.getSslContext();
+            } else {
+                this.sslCtx = SslContextBuilder.forClient().build();
+            }
+        }
+
         return this;
     }
 
@@ -352,7 +362,7 @@ public class SocketIOClient extends Emitter {
         on(EventType.EVENT_PONG, onPongListener);
     }
 
-    private void checkUri(String url, String path, Map<String, String> query) throws URISyntaxException, SSLException {
+    private void checkUri(String url, String path, Map<String, String> query) throws URISyntaxException {
         URI tempUri = new URI(url);
         String tempUriPath = tempUri.getPath();
 
@@ -405,10 +415,6 @@ public class SocketIOClient extends Emitter {
         this.uri = new URI(scheme, null, host, tempUri.getPort(), pathParamUri.getPath(), pathParamUri.getQuery(), null);
 
         logger.info("URI=" + uri.toString());
-        if (ssl) {
-            sslCtx = SslContextBuilder.forClient()
-                    .trustManager(InsecureTrustManagerFactory.INSTANCE).build();
-        }
     }
 
     private void clearScheduler() {

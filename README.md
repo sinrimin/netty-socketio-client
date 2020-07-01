@@ -17,6 +17,8 @@ Licensed under the Apache License 2.0.
 ## Todo list
 * Namespace
 * Binary event
+* API Document
+* Javadoc comment
 
 ## Attention
 * Will NOT support xhr-polling transport

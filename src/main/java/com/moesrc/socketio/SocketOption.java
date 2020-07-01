@@ -1,17 +1,20 @@
 package com.moesrc.socketio;
 
+import io.netty.handler.ssl.SslContext;
+
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 public class SocketOption {
     private Boolean reconnection = true;
-    public Integer reconnectionAttempts = 5;
-    public Long reconnectionDelay = 5000L;
-    public Long pingTimeout = 60000L;
-    public Long pingInterval = 25000L;
-    public String url;
-    public String path = "/socket.io/";
-    public Map<String, String> query = new LinkedHashMap<>();
+    private Integer reconnectionAttempts = 5;
+    private Long reconnectionDelay = 5000L;
+    private Long pingTimeout = 60000L;
+    private Long pingInterval = 25000L;
+    private String url;
+    private String path = "/socket.io/";
+    private Map<String, String> query = new LinkedHashMap<>();
+    private SslContext sslContext;
 
     public boolean isReconnection() {
         return reconnection;
@@ -75,5 +78,13 @@ public class SocketOption {
 
     public void setQuery(Map<String, String> query) {
         this.query = query;
+    }
+
+    public SslContext getSslContext() {
+        return sslContext;
+    }
+
+    public void setSslContext(SslContext sslContext) {
+        this.sslContext = sslContext;
     }
 }
