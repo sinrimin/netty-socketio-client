@@ -1,11 +1,11 @@
 package com.moesrc.socketio;
 
-import io.netty.channel.*;
-import io.netty.handler.codec.http.FullHttpResponse;
-import io.netty.handler.codec.http.websocketx.WebSocketClientHandshaker;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelPromise;
+import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketHandshakeException;
-import io.netty.util.CharsetUtil;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import org.json.JSONArray;
@@ -13,67 +13,46 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.Arrays;
+import java.util.Objects;
 
-public class SocketIODecoderHandler extends SimpleChannelInboundHandler<Object> {
+public class SocketIODecoderHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
 
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(SocketIODecoderHandler.class);
 
-    private final WebSocketClientHandshaker handshaker;
     private ChannelPromise handshakeFuture;
     private SocketIOClient client;
     private PacketDecoder decoder;
 
-    public SocketIODecoderHandler(WebSocketClientHandshaker handshaker, SocketIOClient client, PacketDecoder decoder) {
-        this.handshaker = handshaker;
+    public SocketIODecoderHandler(SocketIOClient client, PacketDecoder decoder) {
         this.client = client;
         this.decoder = decoder;
     }
 
-    public ChannelFuture handshakeFuture() {
+    public ChannelPromise handshakeFuture() {
         return handshakeFuture;
     }
 
     @Override
     public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
         handshakeFuture = ctx.newPromise();
-        client.update(ctx);
+        client.update(ctx, handshakeFuture);
     }
 
     @Override
     public void channelActive(ChannelHandlerContext ctx) {
-        handshaker.handshake(ctx.channel());
-        client.onEvent(EventType.EVENT_ACTIVE, null);
+        client.onEvent(EventType.EVENT_TCP_CONNECT, null);
     }
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) {
-        client.onEvent(EventType.EVENT_DISCONNECT, null);
+        if (handshakeFuture.isSuccess()) {
+            client.onEvent(EventType.EVENT_DISCONNECT, null);
+        }
+        client.onEvent(EventType.EVENT_TCP_DISCONNECT, null);
     }
 
     @Override
-    public void channelRead0(ChannelHandlerContext ctx, Object msg) throws Exception {
-        Channel ch = ctx.channel();
-        if (!handshaker.isHandshakeComplete()) {
-            try {
-                handshaker.finishHandshake(ch, (FullHttpResponse) msg);
-                client.parseHeader((FullHttpResponse) msg);
-                handshakeFuture.setSuccess();
-            } catch (WebSocketHandshakeException e) {
-                logger.error("failed to connect", e.getMessage(), e);
-                handshakeFuture.setFailure(e);
-                throw e;
-            }
-            return;
-        }
-
-        if (msg instanceof FullHttpResponse) {
-            FullHttpResponse response = (FullHttpResponse) msg;
-            throw new IllegalStateException(
-                    "Unexpected FullHttpResponse (getStatus=" + response.status() +
-                            ", content=" + response.content().toString(CharsetUtil.UTF_8) + ')');
-        }
-
-        WebSocketFrame frame = (WebSocketFrame) msg;
+    public void channelRead0(ChannelHandlerContext ctx, WebSocketFrame frame) throws Exception {
         final Packet packet = decoder.decodePackets(client, frame.content());
         logger.debug("received " + packet.toString());
 
@@ -99,14 +78,28 @@ public class SocketIODecoderHandler extends SimpleChannelInboundHandler<Object> 
     }
 
     @Override
+    public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
+        if (Objects.equals(WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_TIMEOUT, evt)) {
+            WebSocketHandshakeException cause = new WebSocketHandshakeException("handshake timed out");
+            logger.error(cause);
+            handshakeFuture.tryFailure(cause);
+        }
+        if (Objects.equals(WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE, evt)) {
+            logger.debug("handshake complete!");
+            handshakeFuture.trySuccess();
+        }
+
+        super.userEventTriggered(ctx, evt);
+    }
+
+    @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
         logger.error(cause.getMessage(), cause);
-        String eventType = EventType.EVENT_ERROR;
         if (!handshakeFuture.isDone()) {
-            handshakeFuture.setFailure(cause);
-            eventType = EventType.EVENT_CONNECT_ERROR;
+            handshakeFuture.tryFailure(cause);
+            ctx.close();
         }
-        client.onEvent(eventType, cause);
+        client.onEvent(EventType.EVENT_ERROR, cause);
         ctx.close();
     }
 

@@ -1,53 +1,29 @@
 package com.moesrc.socketio;
 
-import io.netty.handler.codec.http.websocketx.WebSocketClientHandshaker13;
-import io.netty.handler.ssl.JdkSslContext;
+import io.netty.bootstrap.Bootstrap;
+import io.netty.channel.*;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.handler.codec.http.*;
+import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolConfig;
+import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
+import io.netty.handler.codec.http.websocketx.extensions.compression.WebSocketClientCompressionHandler;
+import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.SslContextBuilder;
+import io.netty.util.concurrent.Future;
+import io.netty.util.concurrent.GenericFutureListener;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import org.json.JSONObject;
 
+import javax.net.ssl.SSLException;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.logging.Logger;
-
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLException;
-
-import io.netty.bootstrap.Bootstrap;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.socket.SocketChannel;
-import io.netty.handler.codec.http.DefaultHttpHeaders;
-import io.netty.handler.codec.http.FullHttpResponse;
-import io.netty.handler.codec.http.HttpClientCodec;
-import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.QueryStringDecoder;
-import io.netty.handler.codec.http.QueryStringEncoder;
-import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
-import io.netty.handler.codec.http.websocketx.WebSocketVersion;
-import io.netty.handler.codec.http.websocketx.extensions.compression.WebSocketClientCompressionHandler;
-import io.netty.handler.logging.LogLevel;
-import io.netty.handler.logging.LoggingHandler;
-import io.netty.handler.ssl.SslContext;
-import io.netty.handler.ssl.SslContextBuilder;
-import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
-import io.netty.util.concurrent.Future;
-import io.netty.util.concurrent.GenericFutureListener;
 
 public class SocketIOClient extends Emitter {
 
@@ -63,7 +39,8 @@ public class SocketIOClient extends Emitter {
 
     private Bootstrap bootstrap;
     private PacketDecoder decoder;
-    private PacketEncoder encoder;
+    private SocketIoEncoderHandler encoderHandler;
+    private WebSocketClientCompressionHandler compressionHandler;
     private Channel channel;
     private ChannelHandlerContext ctx;
 
@@ -246,8 +223,13 @@ public class SocketIOClient extends Emitter {
         return this;
     }
 
-    protected SocketIOClient encoder(PacketEncoder encoder) {
-        this.encoder = encoder;
+    protected SocketIOClient encoderHandler(SocketIoEncoderHandler encoderHandler) {
+        this.encoderHandler = encoderHandler;
+        return this;
+    }
+
+    protected SocketIOClient compressionHandler(WebSocketClientCompressionHandler compressionHandler) {
+        this.compressionHandler = compressionHandler;
         return this;
     }
 
@@ -261,14 +243,16 @@ public class SocketIOClient extends Emitter {
         return this;
     }
 
-    protected void update(ChannelHandlerContext ctx) {
+    protected void update(ChannelHandlerContext ctx, ChannelPromise handshakeFuture) {
         this.ctx = ctx;
+        handshakeFuture.addListener(handshakeFailed);
     }
 
     protected SocketIOClient init() {
         initHandler();
 
         final SocketIOClient me = this;
+
         bootstrap.handler(new ChannelInitializer<SocketChannel>() {
             @Override
             protected void initChannel(SocketChannel ch) {
@@ -277,16 +261,18 @@ public class SocketIOClient extends Emitter {
                     channelPipeline.addLast(sslCtx.newHandler(ch.alloc(), host, port));
                 }
                 channelPipeline.addLast(
-                        new LoggingHandler(LogLevel.DEBUG),
+                        // new LoggingHandler(LogLevel.DEBUG),
                         new HttpClientCodec(),
-                        new HttpObjectAggregator(8192),
-                        WebSocketClientCompressionHandler.INSTANCE,
-                        new SocketIODecoderHandler(
-                                WebSocketClientHandshakerFactory.newHandshaker(
-                                        uri, WebSocketVersion.V13, null, true, new DefaultHttpHeaders()),
-                                me,
-                                decoder),
-                        new SocketIoEncoderHandler(encoder)
+                        new HttpObjectAggregator(64 * 1024),
+                        compressionHandler,
+                        new WebSocketClientProtocolHandler(
+                                WebSocketClientProtocolConfig.newBuilder()
+                                        .webSocketUri(uri)
+                                        .handshakeTimeoutMillis(2000)
+                                        .build()
+                        ),
+                        new SocketIODecoderHandler(me, decoder),
+                        encoderHandler
                 );
             }
         });
@@ -317,26 +303,8 @@ public class SocketIOClient extends Emitter {
             @Override
             public void run() {
                 ChannelFuture connect = bootstrap.connect(host, port);
-                connect.addListener(new GenericFutureListener<Future<? super Void>>() {
-                    @Override
-                    public void operationComplete(Future<? super Void> future) throws Exception {
-                        if (!future.isSuccess()) {
-                            clearScheduler();
-
-                            state.set(SOCKET_STATE.RE_CONNECTING);
-
-                            SocketIOClient.this.onEvent(EventType.EVENT_CONNECT_ERROR, future.cause());
-
-                            if (reconnection && (reconnectMax == 0 || tryReconnect.get() < reconnectMax)) {
-                                schedule(SCHEDULE_KEY.RECONNECT, reconnectTask, reconnectionDelay, TimeUnit.MILLISECONDS);
-                                return;
-                            }
-                            state.set(SOCKET_STATE.DISCONNECTED);
-                        }
-                    }
-                });
+                connect.addListener(connectFailed);
                 channel = connect.channel();
-
             }
         });
     }
@@ -356,8 +324,8 @@ public class SocketIOClient extends Emitter {
     private void initHandler() {
         off();
         on(EventType.EVENT_OPEN, onOpenListener);
-        on(EventType.EVENT_ACTIVE, onActiveListener);
-        on(EventType.EVENT_DISCONNECT, onDisconnectListener);
+        on(EventType.EVENT_TCP_CONNECT, onTcpConnectListener);
+        on(EventType.EVENT_TCP_DISCONNECT, onTcpDisconnectListener);
         on(EventType.EVENT_KICK, onKickListener);
         on(EventType.EVENT_PONG, onPongListener);
     }
@@ -500,7 +468,7 @@ public class SocketIOClient extends Emitter {
 
             logger.info("try to reconnect " + i + "/" + reconnectMax + ".");
 
-            SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT, i);
+            SocketIOClient.this.onEvent(EventType.EVENT_RECONNECTING, i);
             connect0();
         }
     };
@@ -520,6 +488,9 @@ public class SocketIOClient extends Emitter {
     private Emitter.Listener onOpenListener = new Emitter.Listener() {
         @Override
         public void call(Object... data) {
+            if (SOCKET_STATE.RE_CONNECTING == state.get()) {
+                SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT, tryReconnect.get());
+            }
             state.set(SOCKET_STATE.CONNECTED);
 
             tryReconnect.set(0);
@@ -537,14 +508,14 @@ public class SocketIOClient extends Emitter {
         }
     };
 
-    private Emitter.Listener onActiveListener = new Emitter.Listener() {
+    private Emitter.Listener onTcpConnectListener = new Emitter.Listener() {
         @Override
         public void call(Object... data) {
             logger.info("tcp connect success, waiting for websocket handshake!");
         }
     };
 
-    private Emitter.Listener onDisconnectListener = new Emitter.Listener() {
+    private Emitter.Listener onTcpDisconnectListener = new Emitter.Listener() {
         @Override
         public void call(Object... data) {
             logger.info("tcp connection closed!");
@@ -554,9 +525,13 @@ public class SocketIOClient extends Emitter {
                 state.set(SOCKET_STATE.RE_CONNECTING);
 
                 if (reconnection && (reconnectMax == 0 || tryReconnect.get() < reconnectMax)) {
+                    SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT_ATTEMPT, tryReconnect.get());
                     schedule(SCHEDULE_KEY.RECONNECT, reconnectTask, reconnectionDelay, TimeUnit.MILLISECONDS);
                     return;
                 }
+            }
+            if (reconnection) {
+                SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT_FAILED, tryReconnect.get());
             }
             state.set(SOCKET_STATE.DISCONNECTED);
         }
@@ -569,6 +544,53 @@ public class SocketIOClient extends Emitter {
 
             state.set(SOCKET_STATE.DISCONNECTING);
             disconnect0();
+        }
+    };
+
+    private GenericFutureListener connectFailed = new GenericFutureListener<Future<? super Void>>() {
+        @Override
+        public void operationComplete(Future<? super Void> future) throws Exception {
+            if (!future.isSuccess()) {
+                clearScheduler();
+
+                if (SOCKET_STATE.RE_CONNECTING == state.get()) {
+                    SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT_ERROR, future.cause());
+                }
+
+                if (SOCKET_STATE.CONNECTING == state.get()) {
+                    SocketIOClient.this.onEvent(EventType.EVENT_CONNECT_ERROR, future.cause());
+                }
+                state.set(SOCKET_STATE.RE_CONNECTING);
+
+                if (future.cause() instanceof ConnectTimeoutException) {
+                    SocketIOClient.this.onEvent(EventType.EVENT_CONNECT_TIMEOUT, future.cause());
+                }
+
+                if (reconnection && (reconnectMax == 0 || tryReconnect.get() < reconnectMax)) {
+                    SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT_ATTEMPT, tryReconnect.get());
+                    schedule(SCHEDULE_KEY.RECONNECT, reconnectTask, reconnectionDelay, TimeUnit.MILLISECONDS);
+                    return;
+                }
+                if (reconnection) {
+                    SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT_FAILED, tryReconnect.get());
+                }
+                state.set(SOCKET_STATE.DISCONNECTED);
+            }
+        }
+    };
+
+    private GenericFutureListener handshakeFailed = new GenericFutureListener<Future<? super Void>>() {
+        @Override
+        public void operationComplete(Future<? super Void> future) {
+            if (!future.isSuccess()) {
+                SocketIOClient.this.onEvent(EventType.EVENT_CONNECT_TIMEOUT, future.cause());
+                if (SOCKET_STATE.RE_CONNECTING == state.get()) {
+                    SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT_ERROR, future.cause());
+                }
+                if (SOCKET_STATE.CONNECTING == state.get()) {
+                    SocketIOClient.this.onEvent(EventType.EVENT_CONNECT_ERROR, future.cause());
+                }
+            }
         }
     };
 }

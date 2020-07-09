@@ -1,14 +1,11 @@
 package com.moesrc.socketio;
 
+import io.netty.util.internal.PlatformDependent;
+
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
-import io.netty.util.internal.PlatformDependent;
-
-import javax.xml.ws.ServiceMode;
-
-@ServiceMode
 public class AckEntry<T> {
 
     final Map<Long, AckCallback<T>> ackCallbacks = PlatformDependent.newConcurrentHashMap();

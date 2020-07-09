@@ -5,6 +5,7 @@ import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.codec.http.websocketx.extensions.compression.WebSocketClientCompressionHandler;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import io.netty.util.internal.logging.JdkLoggerFactory;
 
@@ -76,6 +77,9 @@ public class Manager {
     private HashedWheelScheduler scheduler = new HashedWheelScheduler();
     private ExecutorService executorService;
     private Map<String, SocketIOClient> sockets = new ConcurrentHashMap<>();
+    private SocketIoEncoderHandler socketIoEncoderHandler = new SocketIoEncoderHandler(encoder);
+    private WebSocketClientCompressionHandler compressionHandler = WebSocketClientCompressionHandler.INSTANCE;
+
 
     private Manager(ManagerOption option) {
 
@@ -123,7 +127,8 @@ public class Manager {
         }
         socket = new SocketIOClient()
                 .bootstrap(b)
-                .encoder(encoder)
+                .encoderHandler(socketIoEncoderHandler)
+                .compressionHandler(compressionHandler)
                 .decoder(decoder)
                 .scheduler(scheduler)
                 .executorService(executorService)
