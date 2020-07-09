@@ -98,6 +98,7 @@ public class SocketIODecoderHandler extends SimpleChannelInboundHandler<WebSocke
         if (!handshakeFuture.isDone()) {
             handshakeFuture.tryFailure(cause);
             ctx.close();
+            return;
         }
         client.onEvent(EventType.EVENT_ERROR, cause);
         ctx.close();
