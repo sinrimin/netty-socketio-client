@@ -77,7 +77,7 @@ public class Manager {
     private HashedWheelScheduler scheduler = new HashedWheelScheduler();
     private ExecutorService executorService;
     private Map<String, SocketIOClient> sockets = new ConcurrentHashMap<>();
-    private SocketIoEncoderHandler socketIoEncoderHandler = new SocketIoEncoderHandler(encoder);
+    private SocketIOEncoderHandler socketIoEncoderHandler = new SocketIOEncoderHandler(encoder);
     private WebSocketClientCompressionHandler compressionHandler = WebSocketClientCompressionHandler.INSTANCE;
 
 
@@ -139,7 +139,7 @@ public class Manager {
 
     public static class ManagerOption {
         private Integer connectTimeout = 5000;
-        private Boolean keepAlive = true;
+        private Boolean keepAlive = false;
         private Boolean tcpNoDelay = true;
         private ExecutorService executorService = null;
 

@@ -39,7 +39,7 @@ public class SocketIOClient extends Emitter {
 
     private Bootstrap bootstrap;
     private PacketDecoder decoder;
-    private SocketIoEncoderHandler encoderHandler;
+    private SocketIOEncoderHandler encoderHandler;
     private WebSocketClientCompressionHandler compressionHandler;
     private Channel channel;
     private ChannelHandlerContext ctx;
@@ -223,7 +223,7 @@ public class SocketIOClient extends Emitter {
         return this;
     }
 
-    protected SocketIOClient encoderHandler(SocketIoEncoderHandler encoderHandler) {
+    protected SocketIOClient encoderHandler(SocketIOEncoderHandler encoderHandler) {
         this.encoderHandler = encoderHandler;
         return this;
     }
@@ -268,6 +268,7 @@ public class SocketIOClient extends Emitter {
                         new WebSocketClientProtocolHandler(
                                 WebSocketClientProtocolConfig.newBuilder()
                                         .webSocketUri(uri)
+                                        .allowExtensions(true)
                                         .handshakeTimeoutMillis(2000)
                                         .build()
                         ),
@@ -464,7 +465,7 @@ public class SocketIOClient extends Emitter {
     private Runnable reconnectTask = new Runnable() {
         @Override
         public void run() {
-            int i = tryReconnect.incrementAndGet();
+            int i = tryReconnect.get();
 
             logger.info("try to reconnect " + i + "/" + reconnectMax + ".");
 
@@ -488,13 +489,6 @@ public class SocketIOClient extends Emitter {
     private Emitter.Listener onOpenListener = new Emitter.Listener() {
         @Override
         public void call(Object... data) {
-            if (SOCKET_STATE.RE_CONNECTING == state.get()) {
-                SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT, tryReconnect.get());
-            }
-            state.set(SOCKET_STATE.CONNECTED);
-
-            tryReconnect.set(0);
-
             JSONObject json = ((JSONObject) data[0]);
             for (Iterator<String> it = json.keys(); it.hasNext(); ) {
                 String key = it.next();
@@ -502,8 +496,16 @@ public class SocketIOClient extends Emitter {
             }
 
             sid = (String) params.get("sid");
-            logger.info(sid);
+            Integer pingInterval = (Integer) params.get("pingInterval");
+            if (pingInterval != null && pingInterval > 0) {
+                SocketIOClient.this.pingInterval = pingInterval;
+            }
+            Integer pingTimeout = (Integer) params.get("pingTimeout");
+            if (pingTimeout != null && pingTimeout > 0) {
+                SocketIOClient.this.pingTimeout = pingTimeout;
+            }
 
+            logger.info("sessionId={}, pingInterval={}, pingTimeout={}", sid, SocketIOClient.this.pingInterval, SocketIOClient.this.pingTimeout);
             sendPing();
         }
     };
@@ -525,13 +527,13 @@ public class SocketIOClient extends Emitter {
                 state.set(SOCKET_STATE.RE_CONNECTING);
 
                 if (reconnection && (reconnectMax == 0 || tryReconnect.get() < reconnectMax)) {
-                    SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT_ATTEMPT, tryReconnect.get());
+                    SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT_ATTEMPT, tryReconnect.incrementAndGet());
                     schedule(SCHEDULE_KEY.RECONNECT, reconnectTask, reconnectionDelay, TimeUnit.MILLISECONDS);
                     return;
                 }
-            }
-            if (reconnection) {
-                SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT_FAILED, tryReconnect.get());
+                if (reconnection) {
+                    SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT_FAILED, tryReconnect.get());
+                }
             }
             state.set(SOCKET_STATE.DISCONNECTED);
         }
@@ -567,7 +569,7 @@ public class SocketIOClient extends Emitter {
                 }
 
                 if (reconnection && (reconnectMax == 0 || tryReconnect.get() < reconnectMax)) {
-                    SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT_ATTEMPT, tryReconnect.get());
+                    SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT_ATTEMPT, tryReconnect.incrementAndGet());
                     schedule(SCHEDULE_KEY.RECONNECT, reconnectTask, reconnectionDelay, TimeUnit.MILLISECONDS);
                     return;
                 }
@@ -590,6 +592,13 @@ public class SocketIOClient extends Emitter {
                 if (SOCKET_STATE.CONNECTING == state.get()) {
                     SocketIOClient.this.onEvent(EventType.EVENT_CONNECT_ERROR, future.cause());
                 }
+            } else {
+                if (SOCKET_STATE.RE_CONNECTING == state.get()) {
+                    SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT, tryReconnect.get());
+                }
+                state.set(SOCKET_STATE.CONNECTED);
+
+                tryReconnect.set(0);
             }
         }
     };
