@@ -65,7 +65,7 @@ public class SocketIOClient extends Emitter {
     private Packet lastBinaryPacket;
 
     private Map<String, String> headers = new HashMap<>();
-    private AckEntry<Object[]> ackEntry = new AckEntry();
+    private AckEntry ackEntry = new AckEntry();
     private Map<String, Object> params = new HashMap<>();
 
     private HashedWheelScheduler scheduler;
@@ -98,11 +98,11 @@ public class SocketIOClient extends Emitter {
     }
 
     public Emitter emit(final Packet packet) {
-        executorService.submit(new Runnable() {
+        executorService.submit(new EventTask(this) {
             @Override
-            public void run() {
+            public void task() {
                 if (!isConnected()) {
-                    SocketIOClient.super.emit(EventType.EVENT_ERROR, new SocketNotAvailableException("socket is not ready. current state is [" + state.get() + "]"));
+                    SocketIOClient.this.onEvent(EventType.EVENT_ERROR, new SocketNotAvailableException("socket is not ready. current state is [" + state.get() + "]"));
                     return;
                 }
 
@@ -114,42 +114,40 @@ public class SocketIOClient extends Emitter {
 
     @Override
     public Emitter emit(final String name, final Object... args) {
-        executorService.submit(new Runnable() {
+        executorService.submit(new EventTask(this) {
             @Override
-            public void run() {
+            public void task() {
+                AckCallback callback = null;
+                Object[] _args = args;
+                Long ackId = null;
+                if (args != null) {
+                    int lastIndex = args.length - 1;
+                    if (args.length > 0 && args[lastIndex] instanceof AckCallback) {
+                        _args = new Object[lastIndex];
+                        System.arraycopy(args, 0, _args, 0, lastIndex);
+                        callback = (AckCallback) args[lastIndex];
+                    }
+                } else {
+                    _args = new Object[0];
+                }
+
                 if (!isConnected()) {
-                    SocketIOClient.super.emit(EventType.EVENT_ERROR, new SocketNotAvailableException("socket is not ready. current state is [" + state.get() + "]"));
+                    if (callback != null) {
+                        callback.onTimeout();
+                    }
+                    SocketIOClient.this.onEvent(EventType.EVENT_ERROR, new SocketNotAvailableException("socket is not ready. current state is [" + state.get() + "]"));
                     return;
                 }
 
                 Packet packet = new Packet(PacketType.MESSAGE);
                 packet.setSubType(PacketType.EVENT);
                 packet.setName(name);
-                packet.setData(Arrays.asList(args));
-                ctx.channel().writeAndFlush(packet);
-            }
-        });
-        return this;
-    }
-
-    public Emitter emit(final String name, final AckCallback<Object[]> callback, final Object... data) {
-        executorService.submit(new Runnable() {
-            @Override
-            public void run() {
-                if (!isConnected()) {
-                    callback.onTimeout();
-                    SocketIOClient.super.emit(EventType.EVENT_ERROR, new SocketNotAvailableException("socket is not ready. current state is [" + state.get() + "]"));
-                    return;
+                packet.setData(Arrays.asList(_args));
+                if (callback != null) {
+                    ackId = ackEntry.addAckCallback(callback);
+                    packet.setAckId(ackId);
+                    scheduleAckTimeout(ackId, callback);
                 }
-
-                long ackId = ackEntry.addAckCallback(callback);
-                scheduleAckTimeout(ackId, callback);
-
-                Packet packet = new Packet(PacketType.MESSAGE);
-                packet.setSubType(PacketType.EVENT);
-                packet.setName(name);
-                packet.setData(Arrays.asList(data));
-                packet.setAckId(ackId);
                 ctx.channel().writeAndFlush(packet);
             }
         });
@@ -161,30 +159,20 @@ public class SocketIOClient extends Emitter {
     }
 
     protected Emitter onEvent(final String name, final Object... args) {
-        executorService.submit(new Runnable() {
+        executorService.submit(new EventTask(this) {
             @Override
-            public void run() {
+            public void task() {
                 SocketIOClient.super.emit(name, args);
             }
         });
         return this;
     }
 
-    protected Emitter onEvent(final String name, final Ack ack, final Object... args) {
-        executorService.submit(new Runnable() {
-            @Override
-            public void run() {
-                SocketIOClient.super.emit(name, ack, args);
-            }
-        });
-        return this;
-    }
-
     protected void onAck(final Long ackId, final Object... data) {
-        executorService.submit(new Runnable() {
+        executorService.submit(new EventTask(this) {
             @Override
-            public void run() {
-                AckCallback<Object[]> callback = ackEntry.removeCallback(ackId);
+            public void task() {
+                AckCallback callback = ackEntry.removeCallback(ackId);
                 if (callback != null) {
                     callback.onSuccess(data);
                 }
@@ -300,9 +288,9 @@ public class SocketIOClient extends Emitter {
     }
 
     private void connect0() {
-        executorService.submit(new Runnable() {
+        executorService.submit(new EventTask(this) {
             @Override
-            public void run() {
+            public void task() {
                 ChannelFuture connect = bootstrap.connect(host, port);
                 connect.addListener(connectFailed);
                 channel = connect.channel();
@@ -311,9 +299,9 @@ public class SocketIOClient extends Emitter {
     }
 
     private void disconnect0() {
-        executorService.submit(new Runnable() {
+        executorService.submit(new EventTask(this) {
             @Override
-            public void run() {
+            public void task() {
                 clearScheduler();
                 if (channel != null && channel.isActive()) {
                     channel.close();
@@ -406,7 +394,7 @@ public class SocketIOClient extends Emitter {
         schedule(SCHEDULE_KEY.PING_TIMEOUT, pingTimeoutTask, pingTimeout, TimeUnit.MILLISECONDS);
     }
 
-    private void scheduleAckTimeout(final Long ackId, AckCallback<?> callback) {
+    private void scheduleAckTimeout(final Long ackId, AckCallback callback) {
         if (callback.getTimeout() == -1) {
             return;
         }
@@ -414,7 +402,7 @@ public class SocketIOClient extends Emitter {
         schedule(SCHEDULE_KEY.ACK_TIMEOUT, new Runnable() {
             @Override
             public void run() {
-                AckCallback<?> cb = ackEntry.removeCallback(ackId);
+                AckCallback cb = ackEntry.removeCallback(ackId);
                 if (cb != null) {
                     cb.onTimeout();
                 }
@@ -602,4 +590,24 @@ public class SocketIOClient extends Emitter {
             }
         }
     };
+
+    private static abstract class EventTask implements Runnable {
+        private final SocketIOClient client;
+
+        public EventTask(SocketIOClient client) {
+            this.client = client;
+        }
+
+        @Override
+        public final void run() {
+            try {
+                task();
+            } catch (Exception e) {
+                logger.error("event task got an exception", e);
+                client.onEvent(EventType.EVENT_ERROR, e);
+            }
+        }
+
+        public abstract void task();
+    }
 }

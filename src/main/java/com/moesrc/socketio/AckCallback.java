@@ -1,6 +1,6 @@
 package com.moesrc.socketio;
 
-public abstract class AckCallback<T> {
+public abstract class AckCallback {
 
     protected final int timeout;
 
@@ -29,7 +29,7 @@ public abstract class AckCallback<T> {
      *
      * @param result - object sended by client
      */
-    public abstract void onSuccess(T result);
+    public abstract void onSuccess(Object... result);
 
     /**
      * Invoked only once then <code>timeout</code> defined

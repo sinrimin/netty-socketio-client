@@ -112,26 +112,16 @@ public class Emitter {
     public Emitter emit(String event, Object... args) {
         ConcurrentLinkedQueue<Listener> callbacks = this.callbacks.get(event);
         if (callbacks != null) {
+            if (args != null) {
+                if (args.length == 2 && args[1] instanceof AckRequest) {
+                    for (Listener fn : callbacks) {
+                        fn.call((AckRequest) args[1], (Object[]) args[0]);
+                    }
+                    return this;
+                }
+            }
             for (Listener fn : callbacks) {
                 fn.call(args);
-            }
-        }
-        return this;
-    }
-
-    /**
-     * Executes each of listeners with the given args.
-     *
-     * @param event    an event name.
-     * @param ack
-     * @param args
-     * @return a reference to this object.
-     */
-    public Emitter emit(String event, Ack ack, Object... args) {
-        ConcurrentLinkedQueue<Listener> callbacks = this.callbacks.get(event);
-        if (callbacks != null) {
-            for (Listener fn : callbacks) {
-                fn.call(ack, args);
             }
         }
         return this;
@@ -171,13 +161,13 @@ public class Emitter {
             }
         }
 
-        public void call(Ack ack, Object... args) {
+        public void call(AckRequest ack, Object... args) {
             if (!selfCall) {
                 selfCall = true;
                 call(args);
             }
             if (ack != null) {
-                ack.send(null);
+                ack.send(new Object[0]);
             }
         }
     }
@@ -199,15 +189,11 @@ public class Emitter {
         }
 
         @Override
-        public void call(Ack ack, Object... args) {
+        public void call(AckRequest ack, Object... args) {
             Emitter.this.off(this.event, this);
             this.fn.call(args);
-            ack.send(null);
+            ack.send(new Object[0]);
         }
     }
 
-
-    public static interface Ack {
-        void send(Object... args);
-    }
 }

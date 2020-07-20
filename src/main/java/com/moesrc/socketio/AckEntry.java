@@ -6,12 +6,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
-public class AckEntry<T> {
+public class AckEntry {
 
-    final Map<Long, AckCallback<T>> ackCallbacks = PlatformDependent.newConcurrentHashMap();
+    final Map<Long, AckCallback> ackCallbacks = PlatformDependent.newConcurrentHashMap();
     final AtomicLong ackIndex = new AtomicLong(-1);
 
-    public long addAckCallback(AckCallback<T> callback) {
+    public long addAckCallback(AckCallback callback) {
         long index = ackIndex.incrementAndGet();
         ackCallbacks.put(index, callback);
         return index;
@@ -21,11 +21,11 @@ public class AckEntry<T> {
         return ackCallbacks.keySet();
     }
 
-    public AckCallback<T> getAckCallback(long index) {
+    public AckCallback getAckCallback(long index) {
         return ackCallbacks.get(index);
     }
 
-    public AckCallback<T> removeCallback(long index) {
+    public AckCallback removeCallback(long index) {
         return ackCallbacks.remove(index);
     }
 

@@ -64,16 +64,18 @@ public class SocketIODecoderHandler extends SimpleChannelInboundHandler<WebSocke
             client.onAck(packet.getAckId(), toArray(packet.getData()));
         } else {
             if (packet.getAckId() != null) {
-                client.onEvent(packet.getName(), new Emitter.Ack() {
-                    @Override
-                    public void send(Object... obj) {
-                        Packet ackPacket = new Packet(PacketType.MESSAGE);
-                        ackPacket.setSubType(PacketType.ACK);
-                        ackPacket.setAckId(packet.getAckId());
-                        ackPacket.setData(Arrays.asList(obj));
-                        client.emit(ackPacket);
-                    }
-                }, toArray(packet.getData()));
+                client.onEvent(packet.getName()
+                        , toArray(packet.getData())
+                        , new AckRequest() {
+                            @Override
+                            public void send(Object... obj) {
+                                Packet ackPacket = new Packet(PacketType.MESSAGE);
+                                ackPacket.setSubType(PacketType.ACK);
+                                ackPacket.setAckId(packet.getAckId());
+                                ackPacket.setData(Arrays.asList(obj));
+                                client.emit(ackPacket);
+                            }
+                        });
                 return;
             }
             client.onEvent(packet.getName(), toArray(packet.getData()));

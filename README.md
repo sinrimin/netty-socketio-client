@@ -26,7 +26,6 @@ Licensed under the Apache License 2.0.
 
 ## Usage
 ```java
-
     Manager manager = Manager.getInstance();
     SocketOption option = new SocketOption();
 
@@ -35,25 +34,65 @@ Licensed under the Apache License 2.0.
     query.put("token", "auth-token-abcdef");
     option.setQuery(query);
 
-    option.setUrl("ws://127.0.0.1:8080");
+    option.setUrl("ws://127.0.0.1:2727");
     SocketIOClient socket = manager.create(option);
 
+    // register event listener
     socket.on("dong", new Emitter.Listener() {
         @Override
-        public void call(Emitter.Ack ack, Object... args) {
+        public void call(Object... args) {
+            System.out.println("received dong" + String.valueOf(args[0]));
+        }
+    });
+
+    // register event listener with ack
+    socket.on("dong_ack", new Emitter.Listener() {
+        @Override
+        public void call(AckRequest ack, Object... args) {
+            System.out.println("received dong" + String.valueOf(args[0]));
             ack.send("hello dong");
         }
     });
 
     socket.connect();
 
-    socket.emit("ding", new AckCallback<Object[]>() {
+    // wait for connect
+    Thread.sleep(2000);
+
+    // send event with callback
+    socket.emit("ding"
+            , "hello ding"
+            , new AckCallback() {
+                @Override
+                public void onSuccess(Object... result) {
+                    System.out.println("received ding ack " + String.valueOf(result[0]));
+                }
+            });
+
+    // send binary event with callback
+    socket.emit("ding_binary"
+            , "hello ding binary 1".getBytes(CharsetUtil.UTF_8)
+            , "hello ding binary 2".getBytes(CharsetUtil.UTF_8)
+            , new AckCallback() {
+                @Override
+                public void onSuccess(Object... result) {
+                    System.out.println("received ding_binary ack " + String.valueOf(result[0]));
+                }
+            });
+
+    // send no data event
+    socket.emit("no_body");
+
+    // send no data event with callback
+    socket.emit("no_body", new AckCallback() {
         @Override
-        public void onSuccess(Object[] result) {
-            System.out.println("received ack " + String.valueOf(result[0]));
+        public void onSuccess(Object... result) {
+            System.out.println("received ding_binary ack " + String.valueOf(result[0]));
         }
     });
 
+    // wait for test complete
+    Thread.sleep(30000);
     socket.disconnect();
     Manager.destroy();
 
