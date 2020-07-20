@@ -54,6 +54,9 @@ public class SocketIODecoderHandler extends SimpleChannelInboundHandler<WebSocke
     @Override
     public void channelRead0(ChannelHandlerContext ctx, WebSocketFrame frame) throws Exception {
         final Packet packet = decoder.decodePackets(client, frame.content());
+        if (packet.hasAttachments() && !packet.isAttachmentsLoaded()) {
+            return;
+        }
         logger.debug("received " + packet.toString());
 
         if (packet.getSubType() == PacketType.ACK

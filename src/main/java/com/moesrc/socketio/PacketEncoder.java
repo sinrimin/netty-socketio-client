@@ -1,10 +1,14 @@
 package com.moesrc.socketio;
 
+import io.netty.buffer.Unpooled;
 import org.json.JSONArray;
 
 import java.io.IOException;
 import java.nio.charset.Charset;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
@@ -179,20 +183,30 @@ public class PacketEncoder {
                         encBuf = allocateBuffer(allocator);
 
                         List<Object> args = packet.getData();
+                        List<byte[]> binArgs = new ArrayList<>();
                         for (Object obj : args) {
+                            if (obj instanceof byte[]) {
+                                binArgs.add((byte[]) obj);
+                                continue;
+                            }
                             values.put(obj);
+                        }
+
+                        if (binArgs.size() > 0) {
+                            packet.initAttachments(binArgs.size());
+                            for (int i = 0; i < binArgs.size(); i++) {
+                                Map<String, Object> map = new HashMap<String, Object>();
+                                map.put("num", i);
+                                map.put("_placeholder", true);
+                                values.put(map);
+                                packet.addAttachment(Unpooled.wrappedBuffer(binArgs.get(i)));
+                            }
+                            packet.setSubType(packet.getSubType() == PacketType.ACK
+                                    ? PacketType.BINARY_ACK : PacketType.BINARY_EVENT);
                         }
 
                         encBuf.writeCharSequence(values.toString(), Charset.defaultCharset());
 
-//                        if (!jsonSupport.getArrays().isEmpty()) {
-//                            packet.initAttachments(jsonSupport.getArrays().size());
-//                            for (byte[] array : jsonSupport.getArrays()) {
-//                                packet.addAttachment(Unpooled.wrappedBuffer(array));
-//                            }
-//                            packet.setSubType(packet.getSubType() == PacketType.ACK
-//                                    ? PacketType.BINARY_ACK : PacketType.BINARY_EVENT);
-//                        }
                     }
 
                     byte subType = toChar(packet.getSubType().getValue());

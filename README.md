@@ -10,13 +10,13 @@ Licensed under the Apache License 2.0.
 
 ## Features
 * Supports websocket transport  
-* Supports ack (acknowledgment of received data) 
+* Supports ack & binary ack (acknowledgment of received data) 
 * Supports event emitter
+* Supports binary event
 * High performance in multi connection
 
 ## Todo list
 * Namespace
-* Binary event
 * API Document
 * Javadoc comment
 
