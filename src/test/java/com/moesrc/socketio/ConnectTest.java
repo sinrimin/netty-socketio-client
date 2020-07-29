@@ -27,7 +27,7 @@ public class ConnectTest {
         socket.on("dong", new Emitter.Listener() {
             @Override
             public void call(Object... args) {
-                System.out.println("received dong" + String.valueOf(args[0]));
+                System.out.println("received dong: " + String.valueOf(args[0]));
             }
         });
 
@@ -35,8 +35,8 @@ public class ConnectTest {
         socket.on("dong_ack", new Emitter.Listener() {
             @Override
             public void call(AckRequest ack, Object... args) {
-                System.out.println("received dong" + String.valueOf(args[0]));
-                ack.send("hello dong");
+                System.out.println("received dong_ack: " + String.valueOf(args[0]));
+                ack.send("hello dong_ack");
             }
         });
 
@@ -51,7 +51,7 @@ public class ConnectTest {
                 , new AckCallback() {
                     @Override
                     public void onSuccess(Object... result) {
-                        System.out.println("received ding ack " + String.valueOf(result[0]));
+                        System.out.println("received ding ack: " + String.valueOf(result[0]));
                     }
                 });
 
@@ -62,7 +62,7 @@ public class ConnectTest {
                 , new AckCallback() {
                     @Override
                     public void onSuccess(Object... result) {
-                        System.out.println("received ding_binary ack " + String.valueOf(result[0]));
+                        System.out.println("received ding_binary ack: " + String.valueOf(result[0]));
                     }
                 });
 
@@ -73,7 +73,7 @@ public class ConnectTest {
         socket.emit("no_body", new AckCallback() {
             @Override
             public void onSuccess(Object... result) {
-                System.out.println("received ding_binary ack " + String.valueOf(result[0]));
+                System.out.println("received no_body ack");
             }
         });
 

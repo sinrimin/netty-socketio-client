@@ -260,7 +260,7 @@ public class PacketDecoder {
             if (packet.getSubType() == PacketType.ACK
                     || packet.getSubType() == PacketType.BINARY_ACK) {
                 ByteBufInputStream in = new ByteBufInputStream(frame);
-                packet.setName(EventType.EVENT_ACK);
+                // packet.setName(EventType.EVENT_ACK);
                 packet.setData(new JSONArray(read(in)));
             }
 

@@ -5,7 +5,7 @@ public interface EventType {
     String EVENT_TCP_CONNECT = "tcp_connect";
     String EVENT_TCP_DISCONNECT = "tcp_disconnect";
     String EVENT_CONNECT = "connect";
-    String EVENT_ACK = "ack";
+    // String EVENT_ACK = "ack";
     String EVENT_PING = "ping";
     String EVENT_PONG = "pong";
     String EVENT_OPEN = "open";

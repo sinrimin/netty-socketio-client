@@ -22,7 +22,6 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class SocketIOClient extends Emitter {
@@ -46,7 +45,6 @@ public class SocketIOClient extends Emitter {
 
     // run state
     private AtomicReference<SOCKET_STATE> state = new AtomicReference<>(SOCKET_STATE.NEW);
-    private AtomicInteger tryReconnect = new AtomicInteger(0);
 
     private URI uri;
     private String scheme;
@@ -55,9 +53,10 @@ public class SocketIOClient extends Emitter {
     private boolean ssl = false;
     private SslContext sslCtx;
     private String sid;
-    private int reconnectMax = 0;
+    private int reconnectMax = Integer.MAX_VALUE;
     private boolean reconnection = true;
-    private long reconnectionDelay = 5000;
+    private Backoff backoff = null;
+
     private long pingTimeout = 60000;
     private long pingInterval = 25000;
     private long lastPingTimestamp = 0L;
@@ -80,7 +79,7 @@ public class SocketIOClient extends Emitter {
             case READY_TO_CONNECT:
                 state.set(SOCKET_STATE.CONNECTING);
 
-                tryReconnect.set(1);
+                backoff.reset();
                 connect0();
         }
         return this;
@@ -186,9 +185,12 @@ public class SocketIOClient extends Emitter {
 
         this.reconnectMax = option.getReconnectionAttempts();
         this.reconnection = option.isReconnection();
-        this.reconnectionDelay = option.getReconnectionDelay();
         this.pingTimeout = option.getPingTimeout();
         this.pingInterval = option.getPingInterval();
+        this.backoff = new Backoff()
+                .setMin(option.getReconnectionDelay())
+                .setMax(option.getReconnectionDelayMax())
+                .setJitter(option.getRandomizationFactor());
 
         if (ssl) {
             if (option.getSslContext() != null) {
@@ -233,7 +235,7 @@ public class SocketIOClient extends Emitter {
 
     protected void update(ChannelHandlerContext ctx, ChannelPromise handshakeFuture) {
         this.ctx = ctx;
-        handshakeFuture.addListener(handshakeFailed);
+        handshakeFuture.addListener(handshakeListener);
     }
 
     protected SocketIOClient init() {
@@ -292,7 +294,7 @@ public class SocketIOClient extends Emitter {
             @Override
             public void task() {
                 ChannelFuture connect = bootstrap.connect(host, port);
-                connect.addListener(connectFailed);
+                connect.addListener(connectListener);
                 channel = connect.channel();
             }
         });
@@ -450,14 +452,27 @@ public class SocketIOClient extends Emitter {
         }
     };
 
+    private boolean reconnect() {
+        if (reconnection && backoff.getAttempts() < reconnectMax) {
+            state.set(SOCKET_STATE.RE_CONNECTING);
+            long duration = backoff.duration();
+            SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT_ATTEMPT, backoff.getAttempts());
+            schedule(SCHEDULE_KEY.RECONNECT, reconnectTask, duration, TimeUnit.MILLISECONDS);
+            return true;
+        }
+        if (reconnection) {
+            SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT_FAILED, backoff.getAttempts());
+        }
+        return false;
+    }
+
     private Runnable reconnectTask = new Runnable() {
         @Override
         public void run() {
-            int i = tryReconnect.get();
 
-            logger.info("try to reconnect " + i + "/" + reconnectMax + ".");
+            logger.info("try to reconnect " + backoff.getAttempts() + "/" + reconnectMax + ".");
 
-            SocketIOClient.this.onEvent(EventType.EVENT_RECONNECTING, i);
+            SocketIOClient.this.onEvent(EventType.EVENT_RECONNECTING, backoff.getAttempts());
             connect0();
         }
     };
@@ -511,19 +526,9 @@ public class SocketIOClient extends Emitter {
             logger.info("tcp connection closed!");
             clearScheduler();
 
-            if (state.get() != SOCKET_STATE.DISCONNECTING) {
-                state.set(SOCKET_STATE.RE_CONNECTING);
-
-                if (reconnection && (reconnectMax == 0 || tryReconnect.get() < reconnectMax)) {
-                    SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT_ATTEMPT, tryReconnect.incrementAndGet());
-                    schedule(SCHEDULE_KEY.RECONNECT, reconnectTask, reconnectionDelay, TimeUnit.MILLISECONDS);
-                    return;
-                }
-                if (reconnection) {
-                    SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT_FAILED, tryReconnect.get());
-                }
+            if (state.get() == SOCKET_STATE.DISCONNECTING || !reconnect()) {
+                state.set(SOCKET_STATE.DISCONNECTED);
             }
-            state.set(SOCKET_STATE.DISCONNECTED);
         }
     };
 
@@ -537,7 +542,7 @@ public class SocketIOClient extends Emitter {
         }
     };
 
-    private GenericFutureListener connectFailed = new GenericFutureListener<Future<? super Void>>() {
+    private GenericFutureListener connectListener = new GenericFutureListener<Future<? super Void>>() {
         @Override
         public void operationComplete(Future<? super Void> future) throws Exception {
             if (!future.isSuccess()) {
@@ -550,26 +555,19 @@ public class SocketIOClient extends Emitter {
                 if (SOCKET_STATE.CONNECTING == state.get()) {
                     SocketIOClient.this.onEvent(EventType.EVENT_CONNECT_ERROR, future.cause());
                 }
-                state.set(SOCKET_STATE.RE_CONNECTING);
 
                 if (future.cause() instanceof ConnectTimeoutException) {
                     SocketIOClient.this.onEvent(EventType.EVENT_CONNECT_TIMEOUT, future.cause());
                 }
 
-                if (reconnection && (reconnectMax == 0 || tryReconnect.get() < reconnectMax)) {
-                    SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT_ATTEMPT, tryReconnect.incrementAndGet());
-                    schedule(SCHEDULE_KEY.RECONNECT, reconnectTask, reconnectionDelay, TimeUnit.MILLISECONDS);
-                    return;
+                if (!reconnect()) {
+                    state.set(SOCKET_STATE.DISCONNECTED);
                 }
-                if (reconnection) {
-                    SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT_FAILED, tryReconnect.get());
-                }
-                state.set(SOCKET_STATE.DISCONNECTED);
             }
         }
     };
 
-    private GenericFutureListener handshakeFailed = new GenericFutureListener<Future<? super Void>>() {
+    private GenericFutureListener handshakeListener = new GenericFutureListener<Future<? super Void>>() {
         @Override
         public void operationComplete(Future<? super Void> future) {
             if (!future.isSuccess()) {
@@ -582,11 +580,11 @@ public class SocketIOClient extends Emitter {
                 }
             } else {
                 if (SOCKET_STATE.RE_CONNECTING == state.get()) {
-                    SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT, tryReconnect.get());
+                    SocketIOClient.this.onEvent(EventType.EVENT_RECONNECT, backoff.getAttempts());
                 }
                 state.set(SOCKET_STATE.CONNECTED);
 
-                tryReconnect.set(0);
+                backoff.reset();
             }
         }
     };

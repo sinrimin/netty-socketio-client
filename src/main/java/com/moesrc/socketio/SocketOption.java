@@ -8,7 +8,9 @@ import java.util.Map;
 public class SocketOption {
     private Boolean reconnection = true;
     private Integer reconnectionAttempts = 5;
-    private Long reconnectionDelay = 5000L;
+    private Long reconnectionDelay = 100L;
+    private Long reconnectionDelayMax = 10000L;
+    private Double randomizationFactor = 0.5;
     private Long pingTimeout = 60000L;
     private Long pingInterval = 25000L;
     private String url;
@@ -38,6 +40,22 @@ public class SocketOption {
 
     public void setReconnectionDelay(long reconnectionDelay) {
         this.reconnectionDelay = reconnectionDelay;
+    }
+
+    public Long getReconnectionDelayMax() {
+        return reconnectionDelayMax;
+    }
+
+    public void setReconnectionDelayMax(Long reconnectionDelayMax) {
+        this.reconnectionDelayMax = reconnectionDelayMax;
+    }
+
+    public Double getRandomizationFactor() {
+        return randomizationFactor;
+    }
+
+    public void setRandomizationFactor(Double randomizationFactor) {
+        this.randomizationFactor = randomizationFactor;
     }
 
     public long getPingTimeout() {

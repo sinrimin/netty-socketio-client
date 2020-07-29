@@ -152,22 +152,30 @@ public class Emitter {
 
     public static abstract class Listener {
 
-        private boolean selfCall = false;
+        private final ThreadLocal<Boolean> selfCall = new ThreadLocal<>();
 
         public void call(Object... args) {
-            if (!selfCall) {
-                selfCall = true;
-                call(null, args);
+            if (selfCall.get() == null) {
+                try {
+                    selfCall.set(true);
+                    call(null, args);
+                } finally {
+                    selfCall.set(null);
+                }
             }
         }
 
         public void call(AckRequest ack, Object... args) {
-            if (!selfCall) {
-                selfCall = true;
-                call(args);
-            }
-            if (ack != null) {
-                ack.send(new Object[0]);
+            if (selfCall.get() == null) {
+                try {
+                    selfCall.set(true);
+                    call(args);
+                    if (ack != null) {
+                        ack.send();
+                    }
+                } finally {
+                    selfCall.set(null);
+                }
             }
         }
     }
